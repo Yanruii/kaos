@@ -1,38 +1,28 @@
 """Implementation of Viewing cone algorithm"""
-from math import asin, atan, sqrt, sin, cos, pi
 import numpy as np
 from numpy import cross
 from numpy.linalg import norm
+
+import mpmath as mp
 
 from ..constants import SECONDS_PER_DAY, ANGULAR_VELOCITY_EARTH, THETA_NAUGHT
 from ..tuples import TimeInterval
 from ..errors import ViewConeError
 
 def cart2sp(x, y, z):
-    """Converts data from cartesian coordinates into spherical.
+    """Converts data from Cartesian coordinates into spherical.
 
     Args:
-        x (scalar or array_like): X-component of data.
-        y (scalar or array_like): Y-component of data.
-        z (scalar or array_like): Z-component of data.
+        x (scalar): X-component of data.
+        y (scalar): Y-component of data.
+        z (scalar): Z-component of data.
 
     Returns:
         Tuple (r, theta, phi) of data in spherical coordinates.
     """
-    x = np.asarray(x)
-    y = np.asarray(y)
-    z = np.asarray(z)
-    scalar_input = False
-    if x.ndim == 0 and y.ndim == 0 and z.ndim == 0:
-        x = x[None]
-        y = y[None]
-        z = z[None]
-        scalar_input = True
-    r = np.sqrt(x**2+y**2+z**2)
-    theta = np.arcsin(z/r)
-    phi = np.arctan2(y, x)
-    if scalar_input:
-        return (r.squeeze(), theta.squeeze(), phi.squeeze())
+    r = mp.sqrt(x**2+y**2+z**2)
+    theta = mp.asin(z/r)
+    phi = mp.atan2(y, x) + mp.pi
     return (r, theta, phi)
 
 def reduce_poi(site_eci, sat_pos, sat_vel, q_magnitude, poi):
@@ -62,7 +52,7 @@ def reduce_poi(site_eci, sat_pos, sat_vel, q_magnitude, poi):
 
     # Find the intervals to cover the input POI
     interval_list = []
-    m = 0
+    m = -1
     while (cur_end < poi.end) and (m < expected_final_m):
         try:
             t_1, t_2, t_3, t_4 = _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m)
@@ -131,28 +121,33 @@ def _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m):
     """
 
     # Get geocentric angles from site ECI
-    r_site_magnitude, lat_geoc, lon_geoc = cart2sp(site_eci.x, site_eci.y, site_eci.z)
+    site_eci = np.array(site_eci) * mp.mpf(1.0)
+    r_site_magnitude, lat_geoc, lon_geoc = cart2sp(site_eci[0], site_eci[1], site_eci[2])
 
     # P vector (also referred  to as orbital angular momentum in the paper) calculations
-    p_unit_x, p_unit_y, p_unit_z = cross(sat_pos, sat_vel) / (norm(sat_pos) * norm(sat_vel))
+    p_unit_x, p_unit_y, p_unit_z = cross(sat_pos, sat_vel) / (mp.norm(sat_pos) * mp.norm(sat_vel))
 
     # Formulas from paper:
     # Note: each Txxx represents an intersection between viewing cone and the orbit
-    gamma = THETA_NAUGHT + asin((r_site_magnitude * sin((pi/2)+THETA_NAUGHT))/q_magnitude)
-    tin = ((1/ANGULAR_VELOCITY_EARTH) * (asin((cos(gamma)-(p_unit_z*sin(lat_geoc))) /
-            (sqrt((p_unit_x**2)+(p_unit_y**2))*cos(lat_geoc)))
-            - lon_geoc - atan(p_unit_x/p_unit_y) + 2*pi*m))
-    tout = ((1/ANGULAR_VELOCITY_EARTH) * (pi - asin((cos(gamma)-(p_unit_z*sin(lat_geoc)))/
-            (sqrt((p_unit_x**2)+(p_unit_y**2))*cos(lat_geoc)))
-            - lon_geoc - atan(p_unit_x/p_unit_y) + 2*pi*m))
+    gamma = THETA_NAUGHT + mp.asin((r_site_magnitude * mp.sin((mp.pi / 2) + THETA_NAUGHT)) / q_magnitude)
+    tin = ((1 / ANGULAR_VELOCITY_EARTH) * (mp.asin((mp.cos(gamma) - (p_unit_z * mp.sin(lat_geoc))) /
+            (mp.sqrt((p_unit_x ** 2) + (p_unit_y ** 2)) * mp.cos(lat_geoc)))
+            - lon_geoc - mp.atan(p_unit_x / p_unit_y) + 2 * mp.pi * m))
+    tout = ((1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - mp.asin((mp.cos(gamma) - (p_unit_z * mp.sin(lat_geoc))) /
+            (mp.sqrt((p_unit_x ** 2) + (p_unit_y ** 2)) * mp.cos(lat_geoc)))
+            - lon_geoc - mp.atan(p_unit_x / p_unit_y) + 2 * mp.pi * m))
 
     # Second set
-    gamma2 = pi - gamma
-    tin_2 = ((1/ANGULAR_VELOCITY_EARTH) * (asin((cos(gamma2)-(p_unit_z*sin(lat_geoc))) /
-            (sqrt((p_unit_x**2)+(p_unit_y**2))*cos(lat_geoc)))
-            - lon_geoc - atan(p_unit_x/p_unit_y) + 2*pi*m))
-    tout_2 = ((1/ANGULAR_VELOCITY_EARTH) * (pi - asin((cos(gamma2)-(p_unit_z*sin(lat_geoc))) /
-            (sqrt((p_unit_x**2)+(p_unit_y**2))*cos(lat_geoc)))
-            - lon_geoc - atan(p_unit_x/p_unit_y) + 2*pi*m))
+    gamma2 = mp.pi - gamma
+    tin_2 = ((1/ANGULAR_VELOCITY_EARTH) * (mp.asin((mp.cos(gamma2)-(p_unit_z * mp.sin(lat_geoc))) /
+            (mp.sqrt((p_unit_x**2)+(p_unit_y**2))*mp.cos(lat_geoc)))
+            - lon_geoc - mp.atan(p_unit_x/p_unit_y) + 2*mp.pi*m))
+    tout_2 = ((1/ANGULAR_VELOCITY_EARTH) * (mp.pi - mp.asin((mp.cos(gamma2)-(p_unit_z*mp.sin(lat_geoc))) /
+            (mp.sqrt((p_unit_x**2)+(p_unit_y**2))*mp.cos(lat_geoc)))
+            - lon_geoc - mp.atan(p_unit_x/p_unit_y) + 2*mp.pi*m))
+
+    # Check for complex answers
+    if(filter(lambda time: not isinstance(time, mp.mpf),[tin,tout,tin_2,tout_2])):
+        raise ValueError()
 
     return tin, tout, tin_2, tout_2
