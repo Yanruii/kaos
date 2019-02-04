@@ -23,6 +23,7 @@ class TestVisibilityFinder(KaosTestCase):
     def setUpClass(cls):
         super(TestVisibilityFinder, cls).setUpClass()
         parse_ephemeris_file("ephemeris/Radarsat2.e")
+        parse_ephemeris_file("ephemeris/Satellite1.e")
 
     #pylint: disable=line-too-long
     @staticmethod
@@ -66,9 +67,10 @@ class TestVisibilityFinder(KaosTestCase):
         return AccessTestInfo(sat_name, target, accesses)
     #pylint: enable=line-too-long
 
-    @data(('test/algorithm/vancouver.test', (1514764802, 1514772000), 60),
-          ('test/algorithm/vancouver.test', (1515160800, 1515164400), 60),
-          ('test/algorithm/vancouver.test', (1515283201, 1515369540), 60))
+    @data(('test/algorithm/toronto.test', (1546300800, 1546387200), 60))
+          # ('test/algorithm/vancouver.test', (1514764802, 1514772000), 60),
+          # ('test/algorithm/vancouver.test', (1515160800, 1515164400), 60),
+          # ('test/algorithm/vancouver.test', (1515283201, 1515369540), 60))
     def test_visibility(self, test_data):
         """Tests that the visibility finder produces the same results as the access file.
 
