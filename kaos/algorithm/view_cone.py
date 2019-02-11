@@ -1,14 +1,18 @@
 """Implementation of Viewing cone algorithm"""
+
+from __future__ import division
+
 import numpy as np
 from numpy import cross
 from numpy.linalg import norm
 
 import mpmath as mp
+# from numpy import rad2deg,deg2rad
 
 from ..constants import SECONDS_PER_DAY, ANGULAR_VELOCITY_EARTH, THETA_NAUGHT
 from ..tuples import TimeInterval
 from ..errors import ViewConeError
-
+from coord_conversion import geod_to_geoc_lat
 
 import matplotlib.pyplot as plt
 
@@ -24,12 +28,12 @@ def cart2sp(x, y, z):
     Returns:
         Tuple (r, theta, phi) of data in spherical coordinates.
     """
-    r = mp.sqrt(x**2+y**2+z**2)
-    theta = mp.asin(z/r)
+    r = mp.sqrt(x ** 2 + y ** 2 + z ** 2)
+    theta = mp.asin(z / r)
     phi = mp.atan2(y, x)
     return (r, theta, phi)
 
-def reduce_poi(site_eci, sat_pos, sat_vel, q_magnitude, poi, a):
+def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
     """Performs a series of viewing cone calculations and shrinks the input POI
 
     Args:
@@ -47,9 +51,24 @@ def reduce_poi(site_eci, sat_pos, sat_vel, q_magnitude, poi, a):
       ViewConeError: on inconclusive result from Viewing cone
     """
 
-    for ass in a:
-        plt.plot((ass[0],ass[1]),(0,0),'m-')
+    site_geoc_lat = geod_to_geoc_lat(site_lat_lon[0])
 
+    if site_lat_lon[1] < 0:
+        site_lat_lon[1] += 360
+    SECONDS_PER_DAY = 23*60*60 + 56*60 + mp.mpf(4.0989)
+    GMT_sidereal_angle = (poi.start - mp.mpf(946728000))*(360/SECONDS_PER_DAY) + mp.mpf(280.46062) # potentially remove a 360
+    site_lon = GMT_sidereal_angle + site_lat_lon[1]
+    site_lon = mp.floor(site_lon)%360 + (site_lon - mp.floor(site_lon))
+
+    if site_lon > 180:
+        site_lon -= 360
+
+    print (site_geoc_lat, site_lon)
+
+
+
+    for access in accesses:
+        plt.plot((access[0],access[1]),(0,0),'m-')
 
     if poi.start > poi.end:
         raise ValueError("poi.start is after poi.end")
@@ -57,14 +76,14 @@ def reduce_poi(site_eci, sat_pos, sat_vel, q_magnitude, poi, a):
     # Tracking how much of the POI has been processed
     cur_end = poi.start
     # Estimate of maximum m
-    expected_final_m = mp.ceil((poi.end - poi.start)/SECONDS_PER_DAY)+1
+    expected_final_m = mp.ceil((poi.end - poi.start)/(24*60*60)) +1
     # print(expected_final_m)
     # Find the intervals to cover the input POI
     interval_list = []
     m = 0
     while (cur_end < poi.end) and (m < expected_final_m):
         try:
-            t_1, t_2, t_3, t_4 = _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m, poi.start)
+            t_1, t_2, t_3, t_4 = _view_cone_calc(site_geoc_lat, site_lon, sat_pos, sat_vel, q_magnitude, m, poi.start)
             # Validate the intervals
             # if (t_3 > t_1) or (t_2 > t_4):
             #     # Unexpected order of times
@@ -78,6 +97,8 @@ def reduce_poi(site_eci, sat_pos, sat_vel, q_magnitude, poi, a):
             # The case were the formulas have less than 4 roots
             raise ViewConeError("Unsupported viewing cone and orbit configuration.")
 
+    plt.gca().set_xbound(poi[0]-5000, poi[1]+5000)
+    # ax.get_xaxis().get_major_formatter().set_useOffset(False)
     plt.show()
     # Adjusting the intervals to fit inside the input POI and return
     return _trim_poi_segments(interval_list, poi)
@@ -107,7 +128,7 @@ def _trim_poi_segments(interval_list, poi):
     return ret_list
 
 
-def _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m, interval_start):
+def _view_cone_calc(lat_geoc, lon_geoc, sat_pos, sat_vel, q_magnitude, m, interval_start):
     """Semi-private: Performs the viewing cone visibility calculation for the day defined by m.
 
     Note: This function is based on a paper titled "rapid satellite-to-site visibility determination
@@ -134,33 +155,37 @@ def _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m, interval_start):
     gamma_line = []
     gamma2_line = []
 
+    lat_geoc = (lat_geoc*mp.pi)/180
+    lon_geoc = (lon_geoc*mp.pi)/180
+
     THETA_NAUGHT = 0 * (mp.pi/180)
     # Get geocentric angles from site ECI
-    site_eci = np.array(site_eci) * mp.mpf(1.0)
-    r_site_magnitude, lat_geoc, lon_geoc = cart2sp(site_eci[0], site_eci[1], site_eci[2])
+    # site_eci = np.array(site_eci) * mp.mpf(1.0)
+    # r_site_magnitude, lat_geoc, lon_geoc = cart2sp(site_eci[0], site_eci[1], site_eci[2])
+
+    r_site_magnitude = 6371008.8
 
     # P vector (also referred  to as orbital angular momentum in the paper) calculations
     p_unit_x, p_unit_y, p_unit_z = cross(sat_pos, sat_vel) / (mp.norm(sat_pos) * mp.norm(sat_vel))
 
     # Formulas from paper:
-    # Note: each Txxx represents an intersection between viewing cone and the orbit
     gamma = THETA_NAUGHT + mp.asin((r_site_magnitude * mp.sin((mp.pi / 2) + THETA_NAUGHT)) / q_magnitude)
+
     arcsin_term = lambda g:(mp.asin((mp.cos(g) - p_unit_z * mp.sin(lat_geoc)) /
                   (mp.sqrt((p_unit_x ** 2) + (p_unit_y ** 2)) * mp.cos(lat_geoc))))
-    arctan_term = mp.atan2(p_unit_x,p_unit_y)
+
+    arctan_term = mp.atan2(p_unit_x, p_unit_y)
 
     time_1 = (1 / ANGULAR_VELOCITY_EARTH) * (arcsin_term(gamma) - lon_geoc - arctan_term + 2 * mp.pi * m)
     time_2 = (1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term(gamma) - lon_geoc - arctan_term + 2 * mp.pi * m)
 
     # Second set
     gamma2 = mp.pi - gamma
-    # time_3 = (1/ANGULAR_VELOCITY_EARTH) * (arcsin_term(gamma2) - lon_geoc - arctan_term + 2 * mp.pi * m)
-    # time_4 = (1/ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term(gamma2) - lon_geoc - arctan_term + 2 * mp.pi * m)
-    time_4 = 0
-    time_3 = 0
+    time_3 = (1/ANGULAR_VELOCITY_EARTH) * (arcsin_term(gamma2) - lon_geoc - arctan_term + 2 * mp.pi * m)
+    time_4 = (1/ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term(gamma2) - lon_geoc - arctan_term + 2 * mp.pi * m)
 
     result = lambda time:(p_unit_x * mp.cos(lat_geoc) * mp.cos(ANGULAR_VELOCITY_EARTH*time+lon_geoc)
-                        + p_unit_y * mp.cos(lat_geoc) * mp.sin(ANGULAR_VELOCITY_EARTH*time+lon_geoc) 
+                        + p_unit_y * mp.cos(lat_geoc) * mp.sin(ANGULAR_VELOCITY_EARTH*time+lon_geoc)
                         + p_unit_z * mp.sin(lat_geoc))
 
     # print ("result 1: ", result(time_1))
@@ -168,11 +193,11 @@ def _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m, interval_start):
     # print ("cos(gamma): ", mp.cos(gamma))
 
 
-    for t in range(interval_start,interval_start+(m+1)*24*60*60,100):
+    for t in range(0,0+(m+1)*24*60*60,100):
         values.append(result(t))
         gamma_line.append(mp.cos(gamma))
         gamma2_line.append(mp.cos(gamma2))
-        times.append(t)
+        times.append(t+interval_start)
 
     print("time 1: ",time_1)
     print("time 2: ",time_2)
@@ -180,10 +205,10 @@ def _view_cone_calc(site_eci, sat_pos, sat_vel, q_magnitude, m, interval_start):
     print("time 4: ",time_4)
     # plt.plot(times, values, "r--", times, gamma_line, "g--", [time_1,time_2], [result(time_1),result(time_2)], "bs")
     plt.plot(times, values, "r--", times, gamma_line, "g--",times, gamma2_line, "k--",
-             [time_1+interval_start,time_2+interval_start], 
+             [time_1+interval_start,time_2+interval_start],
              [result(time_1+interval_start),
              result(time_2+interval_start)], "bs",
-             [time_3+interval_start,time_4+interval_start], 
+             [time_3+interval_start,time_4+interval_start],
              [result(time_3+interval_start),
              result(time_4+interval_start)], "bs")
 

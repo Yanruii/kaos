@@ -7,7 +7,7 @@ from ddt import ddt, data
 
 from kaos.algorithm import view_cone
 from kaos.errors import ViewConeError
-from kaos.constants import SECONDS_PER_DAY, J2000
+from kaos.constants import SECONDS_PER_DAY, J2000,ANGULAR_VELOCITY_EARTH
 from kaos.tuples import Vector3D, TimeInterval
 from kaos.models import Satellite
 from kaos.models.parser import parse_ephemeris_file
@@ -18,6 +18,9 @@ import mpmath as mp
 # from kaos.algorithm.visibility_finder import VisibilityFinder
 
 from .. import KaosTestCase
+import matplotlib.pyplot as plt
+from numpy import cross
+import numpy as np
 
 AccessTestInfo = namedtuple('AccessTestInfo', 'sat_name, target, accesses')
 
@@ -53,7 +56,7 @@ class TestViewCone(KaosTestCase):
         access_info = section_regex.split(access_info_text)
 
         # Parse the header
-        sat_name = re.search(r'Satellite Name: ([a-zA-Z0-9]+)', access_info[1]).groups()[0]
+        sat_name = re.search(r'Satellite Name: ([a-zA-Z0-9_]+)', access_info[1]).groups()[0]
         target = [float(point) for point in
                   re.search(r'Target Point: (.*)', access_info[1]).groups()[0].split(',')]
         # Parse the access times
@@ -76,9 +79,9 @@ class TestViewCone(KaosTestCase):
     #       ('test/algorithm/vancouver.test', (1515024000, 1515110400)), #day 4
     #       ('test/algorithm/vancouver.test', (1515110400, 1515196800)), #day 5
     #       ('test/algorithm/vancouver.test', (1515196800, 1515283200)), #day 6
-    #       ('test/algorithm/vancouver.test', (1515283200, 1515369600)), #day 7
-    # @data(('test/algorithm/vancouver.test', (1514764800, 1515369600))) #day 1-7
-    @data(('test/algorithm/mexico_city.test', (1546344000, 1546473600)))
+    #       ('test/algorithm/vancouver.test', (1515283200, 1515369600))) #day 7
+    # @data(('test/algorithm/vancouver.test', (1514764800, 1514764800+1*24*3600)))
+    @data(('test/algorithm/mexico_city.test', (1546344000, 1546344000+3*24*3600)))
     def test_reduce_poi_with_access_file(self, test_data):
         access_file, interval = test_data
         interval = TimeInterval(*interval)
@@ -87,14 +90,59 @@ class TestViewCone(KaosTestCase):
         q_mag = Satellite.get_by_name(access_info.sat_name)[0].maximum_altitude
         sat_platform_id = Satellite.get_by_name(access_info.sat_name)[0].platform_id
         sat_irp = Interpolator(sat_platform_id)
-        sat_pos, sat_vel = sat_irp.interpolate(interval[1])
 
-        site_eci = lla_to_eci(access_info.target[0], access_info.target[1], 0, interval[1])[0]
 
+        #### checking cross product of sat pos and vel
+        crosses = []
+        times = []
+        for time in range(interval[0], interval[1], 3600):
+
+            sat_pos, sat_vel = np.array(sat_irp.interpolate(time,kind="nearest")) * mp.mpf(1.0)
+            site_eci = lla_to_eci(access_info.target[0], access_info.target[1], 0, time)[0]
+
+            p = cross(sat_pos,sat_vel)/(mp.norm(sat_pos)*mp.norm(sat_vel))
+
+            crosses.append(mp.fdot(p,site_eci)/(mp.norm(site_eci) * mp.norm(p)))
+            # crosses.append(p)
+            times.append(time)
+
+
+        plt.plot(times, crosses, "b--") #, red_time, red, "rs")
+        # plt.show()
+
+        #### check the transformation of lla to spherical
+        # lons = []
+        # sps = []
+        # zeros = []
+        # for lon in range(-180, 181, 10):
+        #     site_eci = lla_to_eci(0, lon, 0, 946747037)[0]
+        #     # sps.append(site_eci)
+        #     zeros.append(0)
+        #     sps.append(view_cone.cart2sp(*site_eci))
+        #     lons.append(lon)
+        # plt.plot(lons, np.transpose(sps)[2], "b--", lons, zeros, "k--")
+        # plt.show()
+
+        # minimum = abs(lla_to_eci(0, 0, 0, 946747037)[0][1])
+        # saved_time = 946747037
+        # for time in range(946747037-100,946747037+100, 1):
+        #     site_eci = abs(lla_to_eci(0, 0, 0, time)[0][1])
+        #     if (site_eci < minimum):
+        #         saved_time = time
+        #         minimum = site_eci
+
+        # print saved_time
+        # print minimum
+
+
+        # site eci to spherical check
+        # site_eci = lla_to_eci(access_info.target[0], access_info.target[1], 0, interval[1])[0]
+        # print (view_cone.cart2sp(*site_eci))
+
+
+        sat_pos, sat_vel = sat_irp.interpolate(interval[1], kind ="nearest")
         trimmed_accesses = view_cone._trim_poi_segments(access_info.accesses, interval)
-
-        poi_list = view_cone.reduce_poi(site_eci, sat_pos, sat_vel, q_mag, interval,trimmed_accesses)
-
+        poi_list = view_cone.reduce_poi(access_info.target, sat_pos, sat_vel, q_mag, interval,trimmed_accesses)
 
 
         def check_reduce_poi_coverage(poi_list,accesses):

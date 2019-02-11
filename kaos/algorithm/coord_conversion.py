@@ -2,6 +2,8 @@ from math import sqrt,sin,cos,atan,tan
 
 from numpy import rad2deg,deg2rad
 from astropy import coordinates
+from astropy.coordinates import Longitude, Latitude
+from astropy import units as u
 from astropy.time import Time
 
 from ..constants import ELLIPSOID_A, ELLIPSOID_E
@@ -88,8 +90,12 @@ def lla_to_eci(lat, lon, alt, time_posix):
     Important Note: Unlike the rest of the software that uses J2000 FK5, the ECI frame used here is
     GCRS; This can potentially introduce around 200m error for locations on surface of Earth.
     """
+
+    longitude = Longitude((lon)*u.deg, u.deg)
+    latitude = Latitude(lat, u.deg)
+
     posix_time_internal = Time(time_posix, format='unix')
-    loc_lla = coordinates.EarthLocation.from_geodetic(lon, lat, alt)
+    loc_lla = coordinates.EarthLocation.from_geodetic(longitude, latitude, alt)
     loc_eci = loc_lla.get_gcrs_posvel(posix_time_internal)
 
     eci_pos = Vector3D(loc_eci[0].x.value, loc_eci[0].y.value, loc_eci[0].z.value)
