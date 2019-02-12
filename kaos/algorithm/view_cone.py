@@ -53,8 +53,7 @@ def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
 
     site_geoc_lat = geod_to_geoc_lat(site_lat_lon[0])
 
-    if site_lat_lon[1] < 0:
-        site_lat_lon[1] += 360
+
     SECONDS_PER_DAY = 23*60*60 + 56*60 + mp.mpf(4.0989)
     GMT_sidereal_angle = (poi.start - mp.mpf(946728000))*(360/SECONDS_PER_DAY) + mp.mpf(280.46062) # potentially remove a 360
     site_lon = GMT_sidereal_angle + site_lat_lon[1]
@@ -76,7 +75,7 @@ def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
     # Tracking how much of the POI has been processed
     cur_end = poi.start
     # Estimate of maximum m
-    expected_final_m = mp.ceil((poi.end - poi.start)/(24*60*60)) +1
+    expected_final_m = mp.ceil((poi.end - poi.start)/(24*60*60)) + 1
     # print(expected_final_m)
     # Find the intervals to cover the input POI
     interval_list = []
@@ -85,9 +84,9 @@ def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
         try:
             t_1, t_2, t_3, t_4 = _view_cone_calc(site_geoc_lat, site_lon, sat_pos, sat_vel, q_magnitude, m, poi.start)
             # Validate the intervals
-            # if (t_3 > t_1) or (t_2 > t_4):
-            #     # Unexpected order of times
-            #     raise ViewConeError("Viewing Cone internal error")
+            if (t_3 > t_1) or (t_2 > t_4):
+                # Unexpected order of times
+                raise ViewConeError("Viewing Cone internal error")
             # Add intervals to the list
             interval_list.append(TimeInterval(poi.start+t_3, poi.start+t_1))
             interval_list.append(TimeInterval(poi.start+t_2, poi.start+t_4))
@@ -152,8 +151,6 @@ def _view_cone_calc(lat_geoc, lon_geoc, sat_pos, sat_vel, q_magnitude, m, interv
     """
     values = []
     times = []
-    gamma_line = []
-    gamma2_line = []
 
     lat_geoc = (lat_geoc*mp.pi)/180
     lon_geoc = (lon_geoc*mp.pi)/180
@@ -170,50 +167,44 @@ def _view_cone_calc(lat_geoc, lon_geoc, sat_pos, sat_vel, q_magnitude, m, interv
 
     # Formulas from paper:
     gamma = THETA_NAUGHT + mp.asin((r_site_magnitude * mp.sin((mp.pi / 2) + THETA_NAUGHT)) / q_magnitude)
-
-    arcsin_term = lambda g:(mp.asin((mp.cos(g) - p_unit_z * mp.sin(lat_geoc)) /
-                  (mp.sqrt((p_unit_x ** 2) + (p_unit_y ** 2)) * mp.cos(lat_geoc))))
-
-    arctan_term = mp.atan2(p_unit_x, p_unit_y)
-
-    time_1 = (1 / ANGULAR_VELOCITY_EARTH) * (arcsin_term(gamma) - lon_geoc - arctan_term + 2 * mp.pi * m)
-    time_2 = (1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term(gamma) - lon_geoc - arctan_term + 2 * mp.pi * m)
-
-    # Second set
     gamma2 = mp.pi - gamma
-    time_3 = (1/ANGULAR_VELOCITY_EARTH) * (arcsin_term(gamma2) - lon_geoc - arctan_term + 2 * mp.pi * m)
-    time_4 = (1/ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term(gamma2) - lon_geoc - arctan_term + 2 * mp.pi * m)
 
-    result = lambda time:(p_unit_x * mp.cos(lat_geoc) * mp.cos(ANGULAR_VELOCITY_EARTH*time+lon_geoc)
-                        + p_unit_y * mp.cos(lat_geoc) * mp.sin(ANGULAR_VELOCITY_EARTH*time+lon_geoc)
+    arctan_term = mp.atan2(p_unit_x , p_unit_y)
+    arcsin_term = lambda g:(mp.asin((mp.cos(g) - p_unit_z * mp.sin(lat_geoc)) /
+                            (mp.sqrt((p_unit_x ** 2) + (p_unit_y ** 2)) * mp.cos(lat_geoc))))
+
+    arcsin_term_gamma = arcsin_term(gamma)
+    arcsin_term_gamma2 = arcsin_term(gamma2)
+
+    time_1 = (1 / ANGULAR_VELOCITY_EARTH) * (arcsin_term_gamma - lon_geoc - arctan_term + 2 * mp.pi * m)
+    time_2 = (1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term_gamma - lon_geoc - arctan_term + 2 * mp.pi * m)
+    time_3 = (1 / ANGULAR_VELOCITY_EARTH) * (arcsin_term_gamma2 - lon_geoc - arctan_term + 2 * mp.pi * m)
+    time_4 = (1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term_gamma2 - lon_geoc - arctan_term + 2 * mp.pi * m)
+
+    result = lambda time:(p_unit_x * mp.cos(lat_geoc) * mp.cos(ANGULAR_VELOCITY_EARTH * time + lon_geoc)
+                        + p_unit_y * mp.cos(lat_geoc) * mp.sin(ANGULAR_VELOCITY_EARTH * time + lon_geoc)
                         + p_unit_z * mp.sin(lat_geoc))
-
-    # print ("result 1: ", result(time_1))
-    # print ("result 2: ", result(time_2))
-    # print ("cos(gamma): ", mp.cos(gamma))
-
 
     for t in range(0,0+(m+1)*24*60*60,100):
         values.append(result(t))
-        gamma_line.append(mp.cos(gamma))
-        gamma2_line.append(mp.cos(gamma2))
         times.append(t+interval_start)
 
     print("time 1: ",time_1)
     print("time 2: ",time_2)
     print("time 3: ",time_3)
     print("time 4: ",time_4)
-    # plt.plot(times, values, "r--", times, gamma_line, "g--", [time_1,time_2], [result(time_1),result(time_2)], "bs")
-    plt.plot(times, values, "r--", times, gamma_line, "g--",times, gamma2_line, "k--",
-             [time_1+interval_start,time_2+interval_start],
-             [result(time_1+interval_start),
-             result(time_2+interval_start)], "bs",
-             [time_3+interval_start,time_4+interval_start],
-             [result(time_3+interval_start),
-             result(time_4+interval_start)], "bs")
+
+    plt.plot(times, values, "g--")
+    plt.axhline(y=mp.cos(gamma),color='c',linestyle='--')
+    plt.axhline(y=mp.cos(gamma2),color='m',linestyle='--')
+    plt.axvline(x=time_1+interval_start,color='r',linestyle='--')
+    plt.axvline(x=time_2+interval_start,color='r',linestyle='--')
+    plt.axvline(x=time_3+interval_start,color='k',linestyle='--')
+    plt.axvline(x=time_4+interval_start,color='k',linestyle='--')
+
 
     # Check for complex answers
-    # if(filter(lambda time: not isinstance(time, mp.mpf),[time_1,time_2])):
-    #     raise ValueError()
+    if(filter(lambda time: not isinstance(time, mp.mpf),[time_1,time_2])):
+        raise ValueError()
 
     return time_1, time_2, time_3, time_4

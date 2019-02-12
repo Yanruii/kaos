@@ -94,20 +94,26 @@ class TestViewCone(KaosTestCase):
 
         #### checking cross product of sat pos and vel
         crosses = []
+        old_corsses =[]
         times = []
-        for time in range(interval[0], interval[1], 3600):
+
+        sat_pos, sat_vel = np.array(sat_irp.interpolate((interval[0]+interval[1])/2,kind="nearest")) * mp.mpf(1.0)
+        old_p = cross(sat_pos,sat_vel)/(mp.norm(sat_pos)*mp.norm(sat_vel))
+
+        for time in range(interval[0], interval[1]+1, 3600):
 
             sat_pos, sat_vel = np.array(sat_irp.interpolate(time,kind="nearest")) * mp.mpf(1.0)
-            site_eci = lla_to_eci(access_info.target[0], access_info.target[1], 0, time)[0]
-
             p = cross(sat_pos,sat_vel)/(mp.norm(sat_pos)*mp.norm(sat_vel))
 
+            site_eci = lla_to_eci(access_info.target[0], access_info.target[1], 0, time)[0]
+
             crosses.append(mp.fdot(p,site_eci)/(mp.norm(site_eci) * mp.norm(p)))
-            # crosses.append(p)
+            old_corsses.append(mp.fdot(old_p,site_eci)/(mp.norm(site_eci) * mp.norm(old_p)))
+
             times.append(time)
 
 
-        plt.plot(times, crosses, "b--") #, red_time, red, "rs")
+        plt.plot(times, crosses, "b--", times, old_corsses, "r--")
         # plt.show()
 
         #### check the transformation of lla to spherical
@@ -140,7 +146,7 @@ class TestViewCone(KaosTestCase):
         # print (view_cone.cart2sp(*site_eci))
 
 
-        sat_pos, sat_vel = sat_irp.interpolate(interval[1], kind ="nearest")
+        sat_pos, sat_vel = sat_irp.interpolate((interval[0]+interval[1])/2, kind ="nearest")
         trimmed_accesses = view_cone._trim_poi_segments(access_info.accesses, interval)
         poi_list = view_cone.reduce_poi(access_info.target, sat_pos, sat_vel, q_mag, interval,trimmed_accesses)
 
