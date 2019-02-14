@@ -17,22 +17,6 @@ from coord_conversion import geod_to_geoc_lat
 import matplotlib.pyplot as plt
 
 
-def cart2sp(x, y, z):
-    """Converts data from Cartesian coordinates into spherical.
-
-    Args:
-        x (scalar): X-component of data.
-        y (scalar): Y-component of data.
-        z (scalar): Z-component of data.
-
-    Returns:
-        Tuple (r, theta, phi) of data in spherical coordinates.
-    """
-    r = mp.sqrt(x ** 2 + y ** 2 + z ** 2)
-    theta = mp.asin(z / r)
-    phi = mp.atan2(y, x)
-    return (r, theta, phi)
-
 def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
     """Performs a series of viewing cone calculations and shrinks the input POI
 
@@ -53,7 +37,6 @@ def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
 
     site_geoc_lat = geod_to_geoc_lat(site_lat_lon[0])
 
-
     SECONDS_PER_DAY = 23*60*60 + 56*60 + mp.mpf(4.0989)
     GMT_sidereal_angle = (poi.start - mp.mpf(946728000))*(360/SECONDS_PER_DAY) + mp.mpf(280.46062) # potentially remove a 360
     site_lon = GMT_sidereal_angle + site_lat_lon[1]
@@ -62,7 +45,7 @@ def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
     if site_lon > 180:
         site_lon -= 360
 
-    print (site_geoc_lat, site_lon)
+    # print (site_geoc_lat, site_lon)
 
 
 
@@ -72,33 +55,32 @@ def reduce_poi(site_lat_lon, sat_pos, sat_vel, q_magnitude, poi, accesses):
     if poi.start > poi.end:
         raise ValueError("poi.start is after poi.end")
 
-    # Tracking how much of the POI has been processed
-    cur_end = poi.start
-    # Estimate of maximum m
-    expected_final_m = mp.ceil((poi.end - poi.start)/(24*60*60)) + 1
-    # print(expected_final_m)
+    # Maximum m
+    expected_final_m = mp.ceil((poi.end - poi.start)/(24*60*60))
     # Find the intervals to cover the input POI
     interval_list = []
     m = 0
-    while (cur_end < poi.end) and (m < expected_final_m):
+    while m < expected_final_m:
         try:
             t_1, t_2, t_3, t_4 = _view_cone_calc(site_geoc_lat, site_lon, sat_pos, sat_vel, q_magnitude, m, poi.start)
             # Validate the intervals
-            if (t_3 > t_1) or (t_2 > t_4):
-                # Unexpected order of times
-                raise ViewConeError("Viewing Cone internal error")
-            # Add intervals to the list
-            interval_list.append(TimeInterval(poi.start+t_3, poi.start+t_1))
-            interval_list.append(TimeInterval(poi.start+t_2, poi.start+t_4))
+            if (t_3 < t_1):
+                interval_list.append(TimeInterval(poi.start+t_3, poi.start+t_1))
+            else:
+                interval_list.append(TimeInterval(poi.start+t_3, poi.start+(m+1)*24*60*60))
+                interval_list.append(TimeInterval(poi.start+m*24*60*60, poi.start+t_1))
+
+            if (t_2 < t_4):
+                interval_list.append(TimeInterval(poi.start+t_2, poi.start+t_4))
+            else:
+                interval_list.append(TimeInterval(poi.start+t_2, poi.start+(m+1)*24*60*60))
+                interval_list.append(TimeInterval(poi.start+m*24*60*60, poi.start+t_4))
             m += 1
-            cur_end = poi.start + t_4
+
         except ValueError:
             # The case were the formulas have less than 4 roots
             raise ViewConeError("Unsupported viewing cone and orbit configuration.")
 
-    plt.gca().set_xbound(poi[0]-5000, poi[1]+5000)
-    # ax.get_xaxis().get_major_formatter().set_useOffset(False)
-    plt.show()
     # Adjusting the intervals to fit inside the input POI and return
     return _trim_poi_segments(interval_list, poi)
 
@@ -176,10 +158,37 @@ def _view_cone_calc(lat_geoc, lon_geoc, sat_pos, sat_vel, q_magnitude, m, interv
     arcsin_term_gamma = arcsin_term(gamma)
     arcsin_term_gamma2 = arcsin_term(gamma2)
 
-    time_1 = (1 / ANGULAR_VELOCITY_EARTH) * (arcsin_term_gamma - lon_geoc - arctan_term + 2 * mp.pi * m)
-    time_2 = (1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term_gamma - lon_geoc - arctan_term + 2 * mp.pi * m)
-    time_3 = (1 / ANGULAR_VELOCITY_EARTH) * (arcsin_term_gamma2 - lon_geoc - arctan_term + 2 * mp.pi * m)
-    time_4 = (1 / ANGULAR_VELOCITY_EARTH) * (mp.pi - arcsin_term_gamma2 - lon_geoc - arctan_term + 2 * mp.pi * m)
+
+    angle_1 = (arcsin_term_gamma - lon_geoc - arctan_term + 2 * mp.pi * m)
+    angle_2 = (mp.pi - arcsin_term_gamma - lon_geoc - arctan_term + 2 * mp.pi * m)
+    angle_3 = (arcsin_term_gamma2 - lon_geoc - arctan_term + 2 * mp.pi * m)
+    angle_4 = (mp.pi - arcsin_term_gamma2 - lon_geoc - arctan_term + 2 * mp.pi * m)
+
+
+    while angle_1 < 0:
+        angle_1 += 2*mp.pi
+    while angle_1 > 2*mp.pi:
+        angle_1 -= 2*mp.pi
+
+    while angle_2 < 0:
+        angle_2 += 2*mp.pi
+    while angle_2 > 2*mp.pi:
+        angle_2 -= 2*mp.pi
+
+    while angle_3 < 0:
+        angle_3 += 2*mp.pi
+    while angle_3 > 2*mp.pi:
+        angle_3 -= 2*mp.pi
+
+    while angle_4 < 0:
+        angle_4 += 2*mp.pi
+    while angle_4 > 2*mp.pi:
+        angle_4 -= 2*mp.pi
+
+    time_1 = (1 / ANGULAR_VELOCITY_EARTH) * angle_1
+    time_2 = (1 / ANGULAR_VELOCITY_EARTH) * angle_2
+    time_3 = (1 / ANGULAR_VELOCITY_EARTH) * angle_3
+    time_4 = (1 / ANGULAR_VELOCITY_EARTH) * angle_4
 
     result = lambda time:(p_unit_x * mp.cos(lat_geoc) * mp.cos(ANGULAR_VELOCITY_EARTH * time + lon_geoc)
                         + p_unit_y * mp.cos(lat_geoc) * mp.sin(ANGULAR_VELOCITY_EARTH * time + lon_geoc)
@@ -189,18 +198,23 @@ def _view_cone_calc(lat_geoc, lon_geoc, sat_pos, sat_vel, q_magnitude, m, interv
         values.append(result(t))
         times.append(t+interval_start)
 
-    print("time 1: ",time_1)
-    print("time 2: ",time_2)
-    print("time 3: ",time_3)
-    print("time 4: ",time_4)
+    # print("time 1: ",time_1)
+    # print("time 2: ",time_2)
+    # print("time 3: ",time_3)
+    # print("time 4: ",time_4)
 
     plt.plot(times, values, "g--")
     plt.axhline(y=mp.cos(gamma),color='c',linestyle='--')
     plt.axhline(y=mp.cos(gamma2),color='m',linestyle='--')
-    plt.axvline(x=time_1+interval_start,color='r',linestyle='--')
-    plt.axvline(x=time_2+interval_start,color='r',linestyle='--')
-    plt.axvline(x=time_3+interval_start,color='k',linestyle='--')
-    plt.axvline(x=time_4+interval_start,color='k',linestyle='--')
+    # plt.axvline(x=time_1+interval_start,color='r',linestyle='--')
+    # plt.axvline(x=time_2+interval_start,color='k',linestyle='-')
+    # plt.axvline(x=time_3+interval_start,color='r',linestyle='-')
+    # plt.axvline(x=time_4+interval_start,color='k',linestyle='--')
+
+    plt.axvline(x=time_1+interval_start+m*24*60*60,color='r',linestyle='--')
+    plt.axvline(x=time_2+interval_start+m*24*60*60,color='k',linestyle='-')
+    plt.axvline(x=time_3+interval_start+m*24*60*60,color='r',linestyle='-')
+    plt.axvline(x=time_4+interval_start+m*24*60*60,color='k',linestyle='--')
 
 
     # Check for complex answers

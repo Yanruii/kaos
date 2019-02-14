@@ -30,8 +30,8 @@ class TestViewCone(KaosTestCase):
     @classmethod
     def setUpClass(cls):
         super(TestViewCone, cls).setUpClass()
-        # parse_ephemeris_file("ephemeris/Radarsat2.e")
-        parse_ephemeris_file("ephemeris/Satellite2.e")
+        parse_ephemeris_file("ephemeris/Radarsat2.e")
+        # parse_ephemeris_file("ephemeris/Satellite2.e")
 
     #pylint: disable=line-too-long
     @staticmethod
@@ -80,8 +80,8 @@ class TestViewCone(KaosTestCase):
     #       ('test/algorithm/vancouver.test', (1515110400, 1515196800)), #day 5
     #       ('test/algorithm/vancouver.test', (1515196800, 1515283200)), #day 6
     #       ('test/algorithm/vancouver.test', (1515283200, 1515369600))) #day 7
-    # @data(('test/algorithm/vancouver.test', (1514764800, 1514764800+1*24*3600)))
-    @data(('test/algorithm/mexico_city.test', (1546344000, 1546344000+3*24*3600)))
+    @data(('test/algorithm/vancouver.test', (1514764800, 1514764800+11*24*3600)))
+    # @data(('test/algorithm/mexico_city.test', (1546344000, 1546344000+1*24*3600)))
     def test_reduce_poi_with_access_file(self, test_data):
         access_file, interval = test_data
         interval = TimeInterval(*interval)
@@ -94,26 +94,26 @@ class TestViewCone(KaosTestCase):
 
         #### checking cross product of sat pos and vel
         crosses = []
-        old_corsses =[]
+        # old_corsses =[]
         times = []
 
         sat_pos, sat_vel = np.array(sat_irp.interpolate((interval[0]+interval[1])/2,kind="nearest")) * mp.mpf(1.0)
-        old_p = cross(sat_pos,sat_vel)/(mp.norm(sat_pos)*mp.norm(sat_vel))
+        # old_p = cross(sat_pos,sat_vel)/(mp.norm(sat_pos)*mp.norm(sat_vel))
 
         for time in range(interval[0], interval[1]+1, 3600):
 
             sat_pos, sat_vel = np.array(sat_irp.interpolate(time,kind="nearest")) * mp.mpf(1.0)
-            p = cross(sat_pos,sat_vel)/(mp.norm(sat_pos)*mp.norm(sat_vel))
+            p = cross(sat_pos/(mp.norm(sat_pos)),sat_vel/mp.norm(sat_vel))
 
             site_eci = lla_to_eci(access_info.target[0], access_info.target[1], 0, time)[0]
-
+            # crosses.append(p)
             crosses.append(mp.fdot(p,site_eci)/(mp.norm(site_eci) * mp.norm(p)))
-            old_corsses.append(mp.fdot(old_p,site_eci)/(mp.norm(site_eci) * mp.norm(old_p)))
+            # old_corsses.append(mp.fdot(old_p,site_eci)/(mp.norm(site_eci) * mp.norm(old_p)))
 
             times.append(time)
 
 
-        plt.plot(times, crosses, "b--", times, old_corsses, "r--")
+        plt.plot(times, crosses, "b--")#, times, old_corsses, "r--")
         # plt.show()
 
         #### check the transformation of lla to spherical
@@ -146,9 +146,39 @@ class TestViewCone(KaosTestCase):
         # print (view_cone.cart2sp(*site_eci))
 
 
-        sat_pos, sat_vel = sat_irp.interpolate((interval[0]+interval[1])/2, kind ="nearest")
+        # sat_pos, sat_vel = sat_irp.interpolate((interval[0]+interval[1])/2, kind ="nearest")
         trimmed_accesses = view_cone._trim_poi_segments(access_info.accesses, interval)
-        poi_list = view_cone.reduce_poi(access_info.target, sat_pos, sat_vel, q_mag, interval,trimmed_accesses)
+        # poi_list = view_cone.reduce_poi(access_info.target, sat_pos, sat_vel, q_mag, interval,trimmed_accesses)
+
+
+        poi_list = []
+        for start_time in range(interval[0], interval[1], 24*60*60):
+            print("here")
+            poi = TimeInterval(start_time, start_time+24*60*60)
+
+            # get sat at start_time
+            sat_pos, sat_vel = sat_irp.interpolate((poi[0]+poi[1])/2)
+            poi_list.extend(view_cone.reduce_poi(access_info.target, sat_pos, sat_vel, q_mag, poi,trimmed_accesses))
+
+
+        plt.gca().set_xbound(interval[0]-5000, interval[1]+5000)
+        # # ax.get_xaxis().get_major_formatter().set_useOffset(False)
+        plt.show()
+
+        tot_time = 0
+        for item in poi_list:
+            tot_time += abs(item[1]-item[0])
+
+        print("calculated total time: {}".format(tot_time))
+        print("expected total time: less than {}".format(interval[1]-interval[0]))
+
+        final_answer = []
+        for poi_base in poi_list:
+            poi_next = next((poi_next for poi_next in poi_list if poi_base[1] == poi_next[0]),None)
+            if poi_next is None:
+                final_answer.append(poi_base)
+            else:
+                final_answer.append(TimeInterval(poi_base[0],poi_next[1]))
 
 
         def check_reduce_poi_coverage(poi_list,accesses):
@@ -160,10 +190,10 @@ class TestViewCone(KaosTestCase):
             return accesses_not_covered
 
 
-        not_covered = check_reduce_poi_coverage(poi_list, trimmed_accesses)
+        not_covered = check_reduce_poi_coverage(final_answer, trimmed_accesses)
         if len(not_covered) > 0 :
             print("stuff that is not covered: ", not_covered)
-            for item in poi_list:
+            for item in final_answer:
                 print("Start time: ")
                 mp.nprint(item[0], 11)
                 print("End time: ")
