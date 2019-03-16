@@ -137,4 +137,3 @@ def parse_ephemeris_file(filename):
             sat.maximum_altitude = max_distance
             sat.save()
         DB.session.commit()
-        return sat.platform_id
